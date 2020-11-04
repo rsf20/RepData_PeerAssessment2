@@ -13,10 +13,14 @@ The basic goal of this assignment is to explore the NOAA Storm Database and answ
 The intended audience are government or municipal manager who might be responsible for preparing for severe weather events and will need to prioritize resources for different types of events. However, this report does not make any specific recommendations.
 
 #Data Processing
+As a standard tool set for data science the library tidyverse is loaded and setup to run before any chunk of code herein:
+```{r}
+library(tidyverse)
+```
+
 The analysis is based on the data from U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database made available as a comma-separated-value file compressed via the bzip2 algorithm to reduce its size at https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
 Loading it for processing and a first overview is done by
 ```{r}
-library(tidyverse)
 # download 1st, because read_csv() does not un-compress remote bz2 files
 download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", 
               "repdata_data_StormData.csv.bz2") 
@@ -25,15 +29,55 @@ summary(storm_data)
 ```
 Some of the variables are defined at:
 - National Weather Service Storm Data Documentation https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf
-- National Climatic Data Center Storm Events FAQ https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf
+This describes the types of events and how the events are described in the data. Unfortunately a formal definition of the event properties is not given.  
+- National Climatic Data Center Storm Events FAQ https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf provides  information about fatality codes, the Saffir-Simpson hurrican scale and some more details.
 For completeness of the report repository they are downloaded as well:
 ```{r}
 download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf", 
               "repdata_peer2_doc_pd01016005curr.pdf")
 download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf", 
-              "repdata_peer2_doc_NCDC_Storm_Events-FAQ_Page.pdf")
+              "repdata_peer2_doc_NCDC Storm Events-FAQ Page.pdf")
 ```
 
-The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete.
+The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete. The higher weight of recent years given by that may also bring a focus on recent events taking account trends like climate heating.    
+The event types in the data are, e.g.:
+```{r}
+event_types <- unique(storm_data$EVTYPE)
+head(event_types)
+tail(event_types)
+```
+Altogether ```R nrow(event_types)``` different types of event specified in capital plain text.  
+
+The impact on population health is measured in terms of FATALITIES and INJURIES as numbers. The economic impact seem to be measured by PROPDMG, PROPDMGEXP, CROPDMG, CROPDMGEXP. As they are poorly documented we first look into the ...EXP variables:
+```{r}
+print(c("PROPDMGEXP values: ", unique(storm_data$PROPDMGEXP)))
+print(c("CROPDMGEXP values: ", unique(storm_data$CROPDMGEXP)))
+```
+This looks like it is save to ignore CROPDMGEXP and assume that PROPDMGEXP is the exponent to the base of 10 of the values given in PROPDMG. Non-numeric characters are assumed to be interpreted like this:
+- H / h = 2
+- K = 3
+- M / m = 6
+- B = 9
+- NA / + / ? / - = 0  
+For the computation of property damages this interpretation is coded into a function:
+```{r}
+property_damage <- function(significand, order_of_magnitude){
+    order_of_magnitude <- if (is.numeric(order_of_magnitude)) order_of_magnitude # no need to convert
+    else # strange values are ignored
+        if (is.na(order_of_magnitude) | str_detect("+?-", order_of_magnitude)) order_of_magnitude <- 0
+        else { # handling of common abbreviations
+            order_of_magnitude <- str_to_lower(order_of_magnitude)
+            if (order_of_magnitude == "h") order_of_magnitude <- 2
+            else if (order_of_magnitude == "k") order_of_magnitude <- 3
+            else if (order_of_magnitude == "m") order_of_magnitude <- 6
+            else if (order_of_magnitude == "b") order_of_magnitude <- 9
+            else order_of_magnitude <- NaN # unrecognized characters are going to trigger an error
+        }
+    significand * 10^order_of_magnitude
+}
+```
+
+
+highest impact? Frequency vs. impact? 
 
 #Results
