@@ -14,7 +14,7 @@ The intended audience are government or municipal manager who might be responsib
 
 #Data Processing
 As a standard tool set for data science the library tidyverse is loaded and setup to run before any chunk of code herein:
-```{r}
+```{r setup}
 library(tidyverse)
 ```
 
@@ -66,7 +66,8 @@ For the computation of property damages this interpretation is coded into a func
 property_damage <- function(significand, order_of_magnitude){
     order_of_magnitude <- if (is.numeric(order_of_magnitude)) order_of_magnitude # no need to convert
     else # strange values are ignored
-        if (is.na(order_of_magnitude) || str_detect("+?-", order_of_magnitude)) order_of_magnitude <- 0
+        if (is.na(order_of_magnitude) || str_detect(as.character(order_of_magnitude), "[:punct:]"))
+            order_of_magnitude <- 0
         else { # handling of common abbreviations
             order_of_magnitude <- str_to_lower(order_of_magnitude)
             if (order_of_magnitude == "h") order_of_magnitude <- 2
@@ -78,17 +79,15 @@ property_damage <- function(significand, order_of_magnitude){
     significand * 10^order_of_magnitude
 }
 storm_data <- mutate(storm_data, 
-                     propdmg_unified = property_damage(storm_data$PROPDMG, storm_data$PROPDMGEXP))
-head(select(storm_data, property_damage, PROPDMG, PROPDMGEXP))
-tail(select(storm_data, property_damage, PROPDMG, PROPDMGEXP))
+                     propdmg_unified = property_damage(PROPDMG, PROPDMGEXP))
+summary(storm_data$propdmg_unified)
 ```
-Debug: 
- Fehler in stri_detect_regex(string, pattern, negate = negate, opts_regex = opts(pattern)) : 
-  Syntax error in regexp pattern. (U_REGEX_RULE_SYNTAX, context=`+`) 
-6.
-stri_detect_regex(string, pattern, negate = negate, opts_regex = opts(pattern)) 
-5.
-str_detect("+?-", order_of_magnitude)
+So maximum property damage is 5 million and for crops it is (ref. initial summary) 990k. Now drop data not required for this analysis, group the data by event type and picture the impact by event type:
+```{r}
+
+```
+
+
 
 highest impact? Frequency vs. impact? 
 
