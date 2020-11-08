@@ -16,17 +16,18 @@ The intended audience are government or municipal manager who might be responsib
 As a standard tool set for data science the library tidyverse is loaded and setup to run before any chunk of code herein:
 ```{r setup}
 library(tidyverse)
+library(stringdist)
 ```
 
 The analysis is based on the data from U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database made available as a comma-separated-value file compressed via the bzip2 algorithm to reduce its size at https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
-Loading it for processing and a first overview is done by
+Loading the first 1000 entries - unfortunately the current hardware can't deal with it all at once - for a first overview is done by:
 ```{r}
 # Download 1st, because read_csv() does not un-compress remote bz2 files.
 # The if-clauses are to prevent time consuming execution, when it is not needed.
 if (!file.exists("repdata_data_StormData.csv.bz2"))
     download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", 
                   "repdata_data_StormData.csv.bz2") 
-if (!exists("storm_data")) storm_data <- read_csv("repdata_data_StormData.csv.bz2")
+if (!exists("storm_data")) storm_data <- read_csv("repdata_data_StormData.csv.bz2", n_max = 1000)
 summary(storm_data)
 ```
 Some of the variables are defined at:
@@ -40,13 +41,31 @@ download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd010
 download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf", 
               "repdata_peer2_doc_NCDC Storm Events-FAQ Page.pdf")
 ```
+Now read all the data in the columns of interest and get the complete overview:
+```{r}
+storm_data <- read_csv("repdata_data_StormData.csv.bz2", 
+                       col_types = cols_only(EVTYPE = col_character(), 
+                                             FATALITIES = col_double(),
+                                             INJURIES = col_double(),
+                                             PROPDMG = col_double(),
+                                             PROPDMGEXP = col_character(),
+                                             CROPDMG = col_double(),
+                                             CROPDMGEXP = col_character(), 
+                                             # spec() says col_logical, but there are "k" etc.
+                                             REFNUM = col_double()))
+summary(storm_data)
+```
 
-The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete. The higher weight of recent years given by that may also bring a focus on recent events taking account trends like climate heating.    
+According to descriptions the events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete. The higher weight of recent years given by that may also bring a focus on recent events taking account trends like climate heating.    
 The event types in the data are, e.g.:
 ```{r}
 event_types <- unique(storm_data$EVTYPE)
 head(event_types)
 tail(event_types)
+print("Fatalities:")
+summary(storm_data$FATALITIES)
+print("Injuries:")
+summary(storm_data$INJURIES)
 ```
 Altogether ```R nrow(event_types)``` different types of event specified in capital plain text.  
 
@@ -55,7 +74,7 @@ The impact on population health is measured in terms of FATALITIES and INJURIES 
 print(c("PROPDMGEXP values: ", unique(storm_data$PROPDMGEXP)))
 print(c("CROPDMGEXP values: ", unique(storm_data$CROPDMGEXP)))
 ```
-This looks like it is save to ignore CROPDMGEXP and assume that PROPDMGEXP is the exponent to the base of 10 of the values given in PROPDMG. Non-numeric characters are assumed to be interpreted like this:
+I assume that C/PROPDMGEXP is the exponent to the base of 10 of the values given in C/PROPDMG. Non-numeric characters are assumed to be interpreted like this:
 - H / h = 2
 - K = 3
 - M / m = 6
@@ -63,7 +82,7 @@ This looks like it is save to ignore CROPDMGEXP and assume that PROPDMGEXP is th
 - NA / + / ? / - = 0  
 For the computation of property damages this interpretation is coded into a function and then added to the storm data:
 ```{r}
-property_damage <- function(significand, order_of_magnitude){
+damage <- function(significand, order_of_magnitude){
     order_of_magnitude <- if (is.numeric(order_of_magnitude)) order_of_magnitude # no need to convert
     else # strange values are ignored
         if (is.na(order_of_magnitude) || str_detect(as.character(order_of_magnitude), "[:punct:]"))
@@ -79,16 +98,69 @@ property_damage <- function(significand, order_of_magnitude){
     significand * 10^order_of_magnitude
 }
 storm_data <- mutate(storm_data, 
-                     propdmg_unified = property_damage(PROPDMG, PROPDMGEXP))
+                     propdmg_unified = damage(PROPDMG, PROPDMGEXP),
+                     cropdmg_unified = damage(CROPDMG, CROPDMGEXP))
+print("Property Damage:")
 summary(storm_data$propdmg_unified)
+print("Crop Damage:")
+summary(storm_data$cropdmg_unified)
 ```
-So maximum property damage is 5 million and for crops it is (ref. initial summary) 990k. Now drop data not required for this analysis, group the data by event type and picture the impact by event type:
+So maximum property damage is `r max(storm_data$propdmg_unified)` and for crops it is `r max(storm_data$propdmg_unified)`. Now make sure event types don't differ by upper/lower case and group the data by event type and picture the impact by event type:
 ```{r}
-
+storm_data <- mutate(storm_data, EVTYPE = str_to_upper(EVTYPE))
+event_damage <- group_by(storm_data, EVTYPE)
+totals <- summarize(event_damage, 
+                    fatalities = sum(FATALITIES), 
+                    injuries = sum(INJURIES), 
+                    propdmg = sum(propdmg_unified), 
+                    cropdmg = sum(cropdmg_unified))
+summary(totals)
+head(totals)
+tail(totals)
 ```
+The tail end shows that there are event types without any damage, which are extracted for concise summary and further analysis of the harmful types: 
+```{r}
+harmless_events <- select(filter(totals, 
+                                 fatalities == 0 & injuries == 0 & propdmg == 0 & cropdmg == 0), 
+                          EVTYPE)
+harmful_events <- filter(totals, fatalities != 0 | injuries != 0 | propdmg != 0 | cropdmg != 0)
+summary(harmful_events)
+head(harmful_events, 10)
+```
+The first five rows (default head()) showed typo "AVALNCE" and therefore separated from the following (displaying 10 rows) "AVALANCHE". So the EVTYPEs needs to be standardized in terms of spelling and then streamlined again. For standardization use the "soundex" algorithm encoded into the phonetic() function of the stringdist library:
+```{r}
+harmful_events <- mutate(harmful_events, event_phonetic = phonetic(EVTYPE))
+harmful_phonetic<- group_by(harmful_events, event_phonetic)
+harmful_totals <- summarize(harmful_phonetic, 
+                            event_type = EVTYPE[1], # readable, but spelling may be wrong
+                            fatalities = sum(fatalities), 
+                            injuries = sum(injuries), 
+                            propdmg = sum(propdmg), 
+                    cropdmg = sum(cropdmg))
+summary(harmful_totals)
+head(harmful_totals)
+tail(harmful_totals)
+```
+## Human Harm
+There are `r nrow(filter(harmful_totals, fatalities != 0))`that caused deaths and `r nrow(filter(harmful_totals, injuries != 0))` that caused injuries. These are plotted here on logarithmic scales (TORNADO is much bigger than the others) and then listed sorted descending first by deaths than by injured:
+```{r}
+humans_harmed <- arrange(filter(harmful_totals, fatalities != 0 | injuries != 0), 
+                         desc(fatalities), desc(injuries))
+ggplot(humans_harmed, aes(fatalities, injuries)) + 
+    geom_text(aes(label = event_type)) + scale_x_log10() + scale_y_log10()
+print(humans_harmed)
+```
+As the event types cluster around the diagonal it seems sensible to concentrate on event types with high death toll as these come with high injuries, too.
 
-
-
-highest impact? Frequency vs. impact? 
+##Damage
+There are `r nrow(filter(harmful_totals, propdmg != 0))`that caused property damage and `r nrow(filter(harmful_totals, cropdmg != 0))` that caused crop damage. These are plotted below and listed sorted descending first by damage to property than by crop:
+```{r}
+cash_dmg <- arrange(filter(harmful_totals, propdmg != 0 | cropdmg != 0), 
+                         desc(propdmg), desc(cropdmg))
+ggplot(cash_dmg, aes(propdmg, cropdmg)) + 
+    geom_text(aes(label = event_type))
+print(cash_dmg)
+```
+Clearly the first six on the list have the biggest impact on property and crops.
 
 #Results
